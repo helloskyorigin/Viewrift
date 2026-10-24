@@ -36,3 +36,20 @@
 .legal-page a{color:#5145e5;font-weight:700}
 .legal-back{display:inline-flex;margin-bottom:20px}
 @media(max-width:600px){.legal-page{padding:40px 0 75px}.footer-links{width:100%;gap:12px}.report-actions{width:100%}.report-actions button{flex:1}}
+
+
+/* Viewrift five-viewport responsive regression fix: do not let the
+   illustration's intrinsic width stretch the mobile grid. */
+.hero-text,.hero-art{min-width:0}
+@media (max-width:850px){
+  .hero{grid-template-columns:minmax(0,1fr)}
+  .hero-text,.hero-art{width:100%;max-width:100%}
+}
+@media (max-width:600px){
+  .hero{overflow:visible}
+  .hero h1{overflow-wrap:break-word}
+  .url-form{width:100%;max-width:100%}
+  .url-form input{flex-basis:0;min-width:0}
+  .url-form button{min-width:0}
+  .hero-art{overflow:clip}
+}
