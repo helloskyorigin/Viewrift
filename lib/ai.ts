@@ -1,4 +1,5 @@
 import type { Issue } from "./types";
+import { validateTemporaryCSS } from "./safety";
 
 export async function improveFixWithGroq(issue: Issue, viewport: number): Promise<Issue> {
   const key = process.env.GROQ_API_KEY;
@@ -23,7 +24,8 @@ export async function improveFixWithGroq(issue: Issue, viewport: number): Promis
     const data = await response.json();
     const raw = String(data.choices?.[0]?.message?.content || "");
     const parsed = JSON.parse(raw) as { suggestion?: string; css?: string };
-    if (!parsed.css || !parsed.suggestion || parsed.css.length > 1800 || /@import|url\s*\(|javascript:|expression\s*\(/i.test(parsed.css)) return issue;
+    if (!parsed.css || !parsed.suggestion || parsed.css.length > 1800) return issue;
+    try { validateTemporaryCSS(parsed.css); } catch { return issue; }
     return { ...issue, suggestion: parsed.suggestion.slice(0, 450), css: parsed.css, ai: true };
   } catch { return issue; }
 }
