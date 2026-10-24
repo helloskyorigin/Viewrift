@@ -6,6 +6,17 @@ import type { Device, DeviceResult, Issue } from "./types";
 const SCAN_TIMEOUT = 17000;
 
 export async function launchScanner(): Promise<Browser> {
+  // Vercel functions do not ship Playwright's downloaded Chromium executable.
+  // Sparticuz provides an AWS-Lambda-compatible Chromium archive for Node.js.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const { default: serverlessChromium } = await import("@sparticuz/chromium");
+    return chromium.launch({
+      headless: true,
+      args: serverlessChromium.args,
+      executablePath: await serverlessChromium.executablePath(),
+      timeout: 20000,
+    });
+  }
   return chromium.launch({ headless: true, timeout: 12000 });
 }
 
