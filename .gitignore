@@ -1,6 +1,10 @@
 node_modules
 .next
-.env
-.env.local
-*.tsbuildinfo
+out
+.env*
+!.env.example
+*.log
+playwright-report
+test-results
 .DS_Store
+*.tsbuildinfo

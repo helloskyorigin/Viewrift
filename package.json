@@ -1,0 +1,27 @@
+{
+  "name": "viewrift",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test:logic": "node --experimental-strip-types --test tests/*.test.mts"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "playwright": "1.64.0",
+    "lucide-react": "^0.468.0",
+    "ipaddr.js": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": { "node": ">=22.0.0" }
+}
