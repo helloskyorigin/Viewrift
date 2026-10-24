@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright-core";
 import { assertPublicTarget } from "./safety";
 import { issueFix } from "./fixes";
 import type { Device, DeviceResult, Issue } from "./types";
@@ -10,11 +10,16 @@ export async function launchScanner(): Promise<Browser> {
   // Sparticuz provides an AWS-Lambda-compatible Chromium archive for Node.js.
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     const { default: serverlessChromium } = await import("@sparticuz/chromium");
+    // Single-threaded serverless environments often fail when the browser
+    // consumes GPU memory; disable WebGL before starting Chromium.
+    serverlessChromium.setGraphicsMode = false;
+    const executablePath = await serverlessChromium.executablePath();
+    if (!executablePath) throw new Error("Chromium binary was not available in the serverless function.");
     return chromium.launch({
       headless: true,
       args: serverlessChromium.args,
-      executablePath: await serverlessChromium.executablePath(),
-      timeout: 20000,
+      executablePath,
+      timeout: 25000,
     });
   }
   return chromium.launch({ headless: true, timeout: 12000 });
