@@ -53,3 +53,35 @@
   .url-form button{min-width:0}
   .hero-art{overflow:clip}
 }
+
+/* Final mobile polish: the illustration must never protrude beyond its card
+   or hide cut-off floating labels on real Android Chrome widths. */
+@media (max-width:600px) {
+  .hero-art {
+    transform:none !important;
+    transform-origin:center center;
+    margin:16px auto 0;
+    height:260px;
+    width:100%;
+    min-width:0;
+    overflow:hidden;
+    isolation:isolate;
+  }
+  .hero-art .art-card {
+    width:485px;
+    min-width:485px;
+    flex-shrink:0;
+    transform:scale(.62) rotate(-1deg);
+    transform-origin:center;
+  }
+  .hero-art .hero-orbit {display:none}
+  .hero-art .floating-chip {
+    right:10px;
+    bottom:5px;
+    transform:none;
+    max-width:calc(100% - 20px);
+    padding:9px 11px;
+    font-size:10px;
+  }
+  .hero-art:before {inset:0}
+}
