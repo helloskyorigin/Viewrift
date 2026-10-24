@@ -3,7 +3,7 @@ import { assertPublicTarget } from "./safety";
 import { issueFix } from "./fixes";
 import type { Device, DeviceResult, Issue } from "./types";
 
-const SCAN_TIMEOUT = 17000;
+const SCAN_TIMEOUT = 11000; // Limit per-viewport waits on serverless plans
 
 export async function launchScanner(): Promise<Browser> {
   // Vercel functions do not ship Playwright's downloaded Chromium executable.
@@ -98,11 +98,20 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
   });
   let page: Page | undefined;
   try {
+    const verifiedHosts = new Map<string, Promise<string>>();
     await context.route("**/*", async (route) => {
       try {
         const reqUrl = route.request().url();
         if (!/^https?:/i.test(reqUrl)) return await route.abort();
-        await assertPublicTarget(reqUrl);
+        const resourceType = route.request().resourceType();
+        if (resourceType === "media" || resourceType === "eventsource") return await route.abort();
+        const host = new URL(reqUrl).hostname;
+        let verified = verifiedHosts.get(host);
+        if (!verified) {
+          verified = assertPublicTarget(reqUrl);
+          verifiedHosts.set(host, verified);
+        }
+        await verified;
         await route.continue();
       } catch { try { await route.abort(); } catch {} }
     });
@@ -113,17 +122,17 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     page.on("popup", popup => { void popup.close().catch(() => {}); });
     await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
     await assertPublicTarget(page.url());
-    await page.waitForTimeout(650);
+    await page.waitForTimeout(400);
     if (patch) {
       await page.addStyleTag({ content: patch });
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(200);
     }
     const raw = await inspect(page);
     const issues: Issue[] = raw.map((finding, i) => {
       const fix = issueFix(finding.type, finding.selector, device.width);
       return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" ? "medium" : "high", ...fix };
     });
-    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 9000, fullPage: false });
+    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 6000, fullPage: false });
     return {
       device,
       status: issues.length ? "issues" : "pass",
