@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/playwright:v1.64.0-noble
 WORKDIR /app
 COPY . .
 # Build and run in the same official Playwright browser image.
-RUN npm install --no-audit --no-fund && npm run build
+RUN npm install --no-audit --no-fund && npm run typecheck && npm run build
 RUN chown -R pwuser:pwuser /app
 USER pwuser
 ENV NODE_ENV=production
