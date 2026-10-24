@@ -23,3 +23,5 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Chromium smoke and public scan
         run: node tests/e2e.mjs
+      - name: Responsive self-test — 3 screens × 5 viewports
+        run: node tests/responsive.mjs
