@@ -62,7 +62,7 @@ async function inspect(page: Page): Promise<RawFinding[]> {
         }
       }
     }
-    return findings.sort((a, b) => Number(a.type === "horizontal-overflow") - Number(b.type === "horizontal-overflow")).slice(0, 8);
+    return findings.sort((a, b) => Number(b.type === "horizontal-overflow") - Number(a.type === "horizontal-overflow")).slice(0, 8);
   });
 }
 
@@ -77,6 +77,8 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     serviceWorkers: "block",
     acceptDownloads: false,
     javaScriptEnabled: true,
+    reducedMotion: "reduce",
+    permissions: [],
   });
   let page: Page | undefined;
   try {
@@ -92,18 +94,20 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     await context.routeWebSocket(/.*/, ws => ws.close());
     page = await context.newPage();
     page.on("dialog", d => { void d.dismiss().catch(() => {}); });
+    page.on("popup", popup => { void popup.close().catch(() => {}); });
     await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
-    await page.waitForTimeout(1100);
+    await assertPublicTarget(page.url());
+    await page.waitForTimeout(650);
     if (patch) {
       await page.addStyleTag({ content: patch });
-      await page.waitForTimeout(350);
+      await page.waitForTimeout(250);
     }
     const raw = await inspect(page);
     const issues: Issue[] = raw.map((finding, i) => {
       const fix = issueFix(finding.type, finding.selector, device.width);
       return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" ? "medium" : "high", ...fix };
     });
-    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 55, animations: "disabled", timeout: 9000, fullPage: false });
+    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 9000, fullPage: false });
     return {
       device,
       status: issues.length ? "issues" : "pass",
@@ -119,7 +123,7 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
       status: "error",
       issues: [],
       screenshot: null,
-      error: /timeout/i.test(msg) ? "This page took too long to load." : /ERR_/i.test(msg) ? "The browser could not load this page. Check the URL or site restrictions." : msg.slice(0, 180),
+      error: /timeout/i.test(msg) ? "This page took too long to load." : /ERR_/i.test(msg) ? "The browser could not load this page. Check the URL or site restrictions." : "This viewport could not be tested. Check that it is public, then try again.",
       loadMs: Date.now() - started,
     };
   } finally {
