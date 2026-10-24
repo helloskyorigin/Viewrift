@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ["playwright", "playwright-core"],
+  serverExternalPackages: ["playwright", "playwright-core", "@sparticuz/chromium"],
+  // Include compressed serverless browser payload in the API function trace.
+  outputFileTracingIncludes: { "/api/scan": ["./node_modules/@sparticuz/chromium/bin/**"] },
   output: "standalone",
   async headers() { return [{source:"/:path*",headers:[
     {key:"X-Content-Type-Options",value:"nosniff"},
