@@ -63,7 +63,7 @@ export default function Home() {
   async function readStream(response: Response, onResult: (r: DeviceResult) => void, onStart?: (id: string) => void) {
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      throw new Error(typeof payload.error === "string" ? payload.error : `Scan failed (${response.status}).`);
+      throw new Error(typeof payload.error === "string" ? payload.error : response.status === 500 ? "The scanner backend failed (HTTP 500). Check Vercel Runtime Logs for /api/scan and confirm the Chromium binary is packaged." : `Scan failed (${response.status}).`);
     }
     if (!response.body) throw new Error("The server did not return scan data.");
     const reader = response.body.getReader();
