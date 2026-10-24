@@ -1,4 +1,4 @@
-import { assertPublicTarget } from "@/lib/safety";
+import { assertPublicTarget, validateTemporaryCSS } from "@/lib/safety";
 import { improveFixWithGroq } from "@/lib/ai";
 import { launchScanner, scanDevice } from "@/lib/scanner";
 import { DEVICES, type StreamEvent } from "@/lib/types";
@@ -19,9 +19,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!body || typeof body !== "object") return Response.json({ error: "Invalid request." }, { status: 400 });
   const params = body as Record<string, unknown>;
   if (typeof params.url !== "string") return Response.json({ error: "Enter a website URL." }, { status: 400 });
-  if (params.patch !== undefined && (typeof params.patch !== "string" || params.patch.length > 3000)) {
-    return Response.json({ error: "The CSS patch is too large." }, { status: 400 });
-  }
+  let patch: string | undefined;
+  try { patch = validateTemporaryCSS(params.patch); }
+  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid CSS patch." }, { status: 400 }); }
   const desired = params.deviceIds;
   if (desired !== undefined && (!Array.isArray(desired) || !desired.length || desired.length > 5 || desired.some(x => typeof x !== "string" || !DEVICES.some(d => d.id === x)))) {
     return Response.json({ error: "Invalid device selection." }, { status: 400 });
@@ -33,6 +33,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const remoteIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const now = Date.now();
+  if (hits.size > 1000) { for (const [key, values] of hits) if (values.every(ts => now - ts > 60 * 60 * 1000)) hits.delete(key); }
   const recent = (hits.get(remoteIp) || []).filter(ts => now - ts < 60 * 60 * 1000);
   if (recent.length >= 8) return Response.json({ error: "Hourly scan limit reached. Try again later." }, { status: 429 });
   if (active >= 2) return Response.json({ error: "Scanner is busy. Please retry shortly." }, { status: 429 });
@@ -40,8 +41,9 @@ export async function POST(request: Request): Promise<Response> {
   active++;
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (event: StreamEvent) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+    start(controller) {
+      void (async () => {
+      const send = (event: StreamEvent) => { try { controller.enqueue(encoder.encode(JSON.stringify(event) + "\n")); } catch { /* Disconnected */ } };
       let browser: Browser | undefined;
       try {
         send({ type: "start", url });
@@ -50,8 +52,8 @@ export async function POST(request: Request): Promise<Response> {
         for (const device of selected) {
           if (request.signal.aborted) break;
           send({ type: "device_start", deviceId: device.id });
-          const result = await scanDevice(browser, url, device, params.patch as string | undefined);
-          if (result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
+          const result = await scanDevice(browser, url, device, patch);
+          if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
             result.issues[0] = await improveFixWithGroq(result.issues[0], device.width);
             aiBudget--;
           }
@@ -63,8 +65,9 @@ export async function POST(request: Request): Promise<Response> {
       } finally {
         if (browser) await browser.close().catch(() => {});
         active = Math.max(0, active - 1);
-        controller.close();
+        try { controller.close(); } catch { /* Already closed */ }
       }
+      })();
     },
   });
   return new Response(stream, {
@@ -72,6 +75,7 @@ export async function POST(request: Request): Promise<Response> {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store, no-transform",
       "X-Content-Type-Options": "nosniff",
+      "X-Robots-Tag": "noindex, nofollow",
     },
   });
 }
