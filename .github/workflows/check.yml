@@ -1,10 +1,11 @@
-name: Check Viewrift
+name: Validate Viewrift
 on:
   push:
   pull_request:
 jobs:
-  validate:
+  build-and-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -12,7 +13,13 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Logic and security tests
+        run: npm run test:logic
       - name: Typecheck
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Chromium smoke and public scan
+        run: node tests/e2e.mjs
