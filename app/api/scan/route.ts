@@ -1,6 +1,5 @@
 import { assertPublicTarget, validateTemporaryCSS } from "@/lib/safety";
 import { improveFixWithGroq } from "@/lib/ai";
-import { launchScanner, scanDevice } from "@/lib/scanner";
 import { DEVICES, type StreamEvent } from "@/lib/types";
 import type { Browser } from "playwright-core";
 
@@ -31,7 +30,7 @@ export async function POST(request: Request): Promise<Response> {
   try { url = await assertPublicTarget(params.url); }
   catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Invalid URL." }, { status: 400 }); }
 
-  const remoteIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const remoteIp = request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const now = Date.now();
   if (hits.size > 1000) { for (const [key, values] of hits) if (values.every(ts => now - ts > 60 * 60 * 1000)) hits.delete(key); }
   const recent = (hits.get(remoteIp) || []).filter(ts => now - ts < 60 * 60 * 1000);
@@ -47,10 +46,12 @@ export async function POST(request: Request): Promise<Response> {
       let browser: Browser | undefined;
       try {
         send({ type: "start", url });
+        // Load the heavy browser engine only after URL validation. A missing
+        // Chromium package must not crash module initialization of this route.
+        const { launchScanner, scanDevice } = await import("@/lib/scanner");
         browser = await launchScanner();
         let aiBudget = 2;
         for (const device of selected) {
-          if (request.signal.aborted) break;
           send({ type: "device_start", deviceId: device.id });
           const result = await scanDevice(browser, url, device, patch);
           if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
