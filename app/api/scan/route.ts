@@ -66,9 +66,9 @@ export async function POST(request: Request): Promise<Response> {
         // message instead of a vague 500 error.
         console.error("[Viewrift scanner] Scanner session failed:", error);
         const msg = error instanceof Error ? error.message : String(error);
-        const browserFailure = /chromium|browserType\.launch|executable|shared libr|libnss|no such file|ENOMEM|EACCES/i.test(msg);
+        const browserFailure = /chromium|browserType\\.launch|executable|shared libr|libnss|no such file|ENOMEM|EACCES|browsers\\.json|playwright-core|cannot find module|module not found/i.test(msg);
         send({ type: "error", message: browserFailure
-          ? "Screenshot engine is unavailable on this deployment. The browser runtime needs a serverless Chromium binary and sufficient function memory."
+          ? "The screenshot engine could not start. Browser files may be missing from the deployment. The project owner should check Playwright runtime packaging."
           : /timeout|timed out/i.test(msg)
           ? "This scan timed out. Try a faster public website."
           : "The scanner encountered a server error. Please try again or contact the project owner." });
