@@ -79,3 +79,20 @@ Next.js App Router + React + TypeScript + CSS + Playwright Chromium + optional G
 ## Project status
 
 Source package prepared for a hackathon MVP. Dependencies/browser installation and a deployed, live end-to-end scan still need verification in an internet-connected Node environment.
+
+## Release refinements (24 October 2026)
+
+- Viewrift vector logo and matching browser favicon.
+- Clear, lightweight three-screen UX; responsive report with safe sample labeling.
+- Real scan events now stream as each viewport starts and completes.
+- If a later viewport fails, already collected scan results are preserved.
+- Per-viewport error states stay separate from passing checks.
+- Downloadable JSON issue reports (screenshots excluded to keep exports lighter).
+- Temporary CSS patch validation, safer errors, popup blocking, and issue re-check.
+- Privacy and Terms pages with honest data handling information.
+- /api/health endpoint and security response headers.
+- GitHub Actions workflow includes security logic tests, TypeScript checks, Next.js build, mobile UI smoke, and live Chromium screenshot verification.
+
+### Release gate before declaring fully production-ready
+
+Check the **GitHub Actions** run in this repository. It must pass before claiming the shipped commit builds and scans successfully. Then deploy behind network-level SSRF protection, add distributed rate limiting and monitoring, and test real sites under expected traffic. CI can validate one Chromium scan but cannot certify all websites or device/browser combinations.
