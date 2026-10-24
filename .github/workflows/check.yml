@@ -19,6 +19,8 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Verify Chromium and Playwright function bundle
+        run: node tests/scan-trace.mjs
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Chromium smoke and public scan
