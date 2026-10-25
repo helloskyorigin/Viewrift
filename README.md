@@ -70,9 +70,11 @@ Next.js App Router + React + TypeScript + CSS + Playwright Chromium + optional G
 
 ## Implementation notes
 
-- A scan runs one Chromium browser and isolated contexts sequentially for the five sizes.
+- A scan runs **one Chromium browser** with up to **two isolated viewport contexts in parallel**. Results stream as each viewport finishes; users can view a partial report while others run.
 - Screenshots are returned as JPEG data URLs during the stream and are not stored server-side.
+- Optional Groq suggestions run independently of the viewport scan and are bounded by a short timeout; rule-based CSS suggestions appear first.
 - Scans are limited per process and per forwarded IP as a basic prototype control.
+- Browser startup (including serverless cold starts), slow DNS, third-party scripts, and hosting constraints can still dominate latency. This is a faster MVP, not a guaranteed fixed-time scan.
 - Failed viewports show a separate error status, not a fabricated pass.
 - A retest compares whether the same issue type/selector is still detected; it does not guarantee the patch is correct.
 
