@@ -14,7 +14,7 @@ export const DEVICES: Device[] = [
 ];
 export type Issue = {
   id: string;
-  type: "horizontal-overflow" | "element-overflow" | "overlap";
+  type: "horizontal-overflow" | "element-overflow" | "overlap" | "broken-image";
   severity: "high" | "medium";
   title: string;
   description: string;
@@ -24,11 +24,21 @@ export type Issue = {
   css: string;
   ai?: boolean;
 };
+export type DeviceDiagnostics = {
+  title: string;
+  documentWidth: number;
+  overflowPixels: number;
+  elementsInspected: number;
+  interactiveElements: number;
+  imagesFound: number;
+  imagesBroken: number;
+};
 export type DeviceResult = {
   device: Device;
   status: "pass" | "issues" | "error";
   issues: Issue[];
   screenshot: string | null;
+  diagnostics?: DeviceDiagnostics;
   finalUrl?: string;
   loadMs?: number;
   error?: string;
