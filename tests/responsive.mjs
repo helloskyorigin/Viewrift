@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
+const simulatedDevices = [
+ {id:"android",label:"Android",width:360,height:800,family:"mobile"},
+ {id:"iphone",label:"iPhone",width:390,height:844,family:"mobile"},
+ {id:"tablet",label:"Tablet",width:768,height:1024,family:"tablet"},
+ {id:"laptop",label:"Laptop",width:1366,height:768,family:"desktop"},
+ {id:"desktop",label:"Desktop",width:1920,height:1080,family:"desktop"},
+];
+const fixtureImage="data:image/svg+xml;base64,"+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="100%" height="100%" fill="#eef2ff"/></svg>').toString("base64");
+const mockEvents=[
+ {type:"start",url:"https://example.com"},
+ ...simulatedDevices.flatMap(device=>[
+   {type:"device_start",deviceId:device.id},
+   {type:"device_result",result:{device,status:"pass",issues:[],screenshot:fixtureImage,loadMs:300,
+     diagnostics:{title:"Example Domain",documentWidth:device.width,overflowPixels:0,elementsInspected:6,interactiveElements:1,imagesFound:0,imagesBroken:0}}},
+ ]),
+ {type:"done"},
+].map(event=>JSON.stringify(event)).join("\n")+"\n";
+
 const PORT=3212,base=`http://127.0.0.1:${PORT}`;
 const sizes=[[360,800],[390,844],[768,1024],[1366,768],[1920,1080]];
 const server=spawn("node_modules/.bin/next",["start","--hostname","127.0.0.1","--port",String(PORT)],{stdio:"inherit",env:{...process.env,PORT:String(PORT)}});
@@ -25,12 +43,14 @@ try{
  await ready();const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage();
+  await page.route("**/api/scan",async route => route.fulfill({status:200,contentType:"application/x-ndjson",body:mockEvents}));
   for(const [width,height] of sizes){
    await page.setViewportSize({width,height});await page.goto(base);await page.locator("#url-input").waitFor();
    await check(page,landing,"Landing",width);
-   await page.locator(".sample-link").click();await page.getByText("SAMPLE DATA").waitFor();
+   await page.locator("#url-input").fill("https://example.com");await page.locator(".url-form button").click();await page.locator(".capture-grid").waitFor();
    await check(page,results,"Results",width);
   }
+  await page.unroute("**/api/scan");
   await page.route("**/api/scan",async route=>{await new Promise(r=>setTimeout(r,1200));await route.fulfill({status:400,contentType:"application/json",body:'{"error":"UI test"}'}).catch(()=>{})});
   for(const [width,height] of sizes){
    await page.setViewportSize({width,height});await page.goto(base);
