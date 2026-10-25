@@ -70,7 +70,8 @@ Next.js App Router + React + TypeScript + CSS + Playwright Chromium + optional G
 
 ## Implementation notes
 
-- A scan runs **one Chromium browser** with up to **two isolated viewport contexts in parallel**. Results stream as each viewport finishes; users can view a partial report while others run.
+- A scan runs **one Chromium browser** with two sequential isolated page loads: one for Android/iPhone emulation and one for tablet/laptop/desktop. Each page is resized to capture its device-specific screenshot and DOM measurements; this avoids five expensive independent navigations and unstable parallel tabs in serverless Chromium.
+- Results stream internally for honest progress, but the report only opens after all five viewport attempts have completed. A failed capture is explicitly marked as an error; no stock/demo screenshot is substituted.
 - Screenshots are returned as JPEG data URLs during the stream and are not stored server-side.
 - Optional Groq suggestions run independently of the viewport scan and are bounded by a short timeout; rule-based CSS suggestions appear first.
 - Scans are limited per process and per forwarded IP as a basic prototype control.
@@ -87,7 +88,7 @@ Source package prepared for a hackathon MVP. Dependencies/browser installation a
 - Viewrift vector logo and matching browser favicon.
 - Clear, lightweight three-screen UX; responsive report with safe sample labeling.
 - Real scan events now stream as each viewport starts and completes.
-- If a later viewport fails, already collected scan results are preserved.
+- If one viewport fails, the other viewport results are preserved. A failed browser context still emits failure events for its affected screen sizes.
 - Per-viewport error states stay separate from passing checks.
 - Downloadable JSON issue reports (screenshots excluded to keep exports lighter).
 - Temporary CSS patch validation, safer errors, popup blocking, and issue re-check.
