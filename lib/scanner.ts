@@ -119,6 +119,7 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     permissions: [],
   });
   let page: Page | undefined;
+  let capturedScreenshot: string | null = null;
   try {
     const verifiedHosts = new Map<string, Promise<string>>();
     await context.route("**/*", async (route) => {
@@ -142,7 +143,7 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     page = await context.newPage();
     page.on("dialog", d => { void d.dismiss().catch(() => {}); });
     page.on("popup", popup => { void popup.close().catch(() => {}); });
-    await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
+    const navigationResponse = await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
     await assertPublicTarget(page.url());
     // Capture after core resources have a chance to paint. A strict cap prevents
     // slow third-party scripts from delaying every viewport indefinitely.
@@ -152,18 +153,27 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
       await page.addStyleTag({ content: patch });
       await page.waitForTimeout(120);
     }
+    // Capture real pixels before running DOM analysis so an inspection failure
+    // cannot make an otherwise valid website screenshot disappear.
+    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 4000, fullPage: false });
+    capturedScreenshot = `data:image/jpeg;base64,${screenshotBuffer.toString("base64")}`;
     const { findings: raw, diagnostics } = await inspect(page);
     const issues: Issue[] = raw.map((finding, i) => {
       const fix = issueFix(finding.type, finding.selector, device.width);
       return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" || finding.type === "broken-image" ? "medium" : "high", ...fix };
     });
-    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 4000, fullPage: false });
+    const httpStatus = navigationResponse?.status() ?? 200;
+    if (httpStatus >= 400) return {
+      device, status: "error", issues: [], screenshot: capturedScreenshot, diagnostics,
+      error: `The website returned HTTP ${httpStatus}. This is the real response screenshot, but the layout is not marked as passing.`,
+      finalUrl: page.url(), loadMs: Date.now() - started,
+    };
     return {
       device,
       status: issues.length ? "issues" : "pass",
       issues,
       diagnostics,
-      screenshot: `data:image/jpeg;base64,${screenshotBuffer.toString("base64")}`,
+      screenshot: capturedScreenshot,
       finalUrl: page.url(),
       loadMs: Date.now() - started,
     };
@@ -173,8 +183,8 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
       device,
       status: "error",
       issues: [],
-      screenshot: null,
-      error: /timeout/i.test(msg) ? "This page took too long to load." : /ERR_/i.test(msg) ? "The browser could not load this page. Check the URL or site restrictions." : "This viewport could not be tested. Check that it is public, then try again.",
+      screenshot: capturedScreenshot,
+      error: capturedScreenshot ? "Screenshot captured, but automated analysis could not finish. This viewport has not passed validation." : /timeout/i.test(msg) ? "This page took too long to load." : /ERR_/i.test(msg) ? "The browser could not load this page. Check the URL or site restrictions." : "This viewport could not be tested. Check that it is public, then try again.",
       loadMs: Date.now() - started,
     };
   } finally {
