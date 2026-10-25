@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { assertPublicTarget } from "./safety";
 import { issueFix } from "./fixes";
 import type { Device, DeviceResult, DeviceDiagnostics, Issue } from "./types";
@@ -121,7 +121,10 @@ export async function scanDeviceGroup(
   }
   const results: DeviceResult[] = [];
   const groupStarted = Date.now();
-  const context = await browser.newContext({
+  const push = (result: DeviceResult) => { results.push(result); emit?.(result); };
+  let context: BrowserContext | undefined;
+  try {
+    context = await browser.newContext({
     viewport: { width: devices[0].width, height: devices[0].height },
     deviceScaleFactor: 1,
     isMobile: devices[0].family === "mobile",
@@ -132,13 +135,13 @@ export async function scanDeviceGroup(
     javaScriptEnabled: true,
     reducedMotion: "reduce",
     permissions: [],
-  });
+    });
 
-  const push = (result: DeviceResult) => { results.push(result); emit?.(result); };
-  let page: Page | undefined;
-  let navigationError: string | undefined;
-  let statusCode = 200;
-  try {
+    // This includes launch failures: all group members receive an explicit
+    // error instead of leaving the UI stuck at 2/5 indefinitely.
+    let page: Page | undefined;
+    let navigationError: string | undefined;
+    let statusCode = 200;
     // Validate the origin of every browser request. Cache DNS checks by origin
     // within the isolated session, but do not accept unchecked redirects.
     const verifiedHosts = new Map<string, Promise<string>>();
@@ -237,7 +240,7 @@ export async function scanDeviceGroup(
       });
     }
   } finally {
-    await context.close().catch(() => {});
+    await context?.close().catch(() => {});
   }
   return results;
 }
