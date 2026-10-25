@@ -85,3 +85,9 @@
   }
   .hero-art:before {inset:0}
 }
+
+/* Progressive scan: make early real results available without waiting for all 5. */
+.scan-preview-action { display:flex; justify-content:center; margin: 18px 0 8px; }
+.scan-preview-action .secondary-btn { display:inline-flex; align-items:center; gap:8px; }
+.report-live-note { display:flex; align-items:center; gap:10px; margin:16px 0 18px; padding:12px 16px; border:1px solid #c7d2fe; background:#eef2ff; color:#3730a3; border-radius:12px; font-size:13px; font-weight:600; line-height:1.5; }
+.report-live-note svg { flex-shrink:0; }
