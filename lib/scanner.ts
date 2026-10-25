@@ -104,13 +104,28 @@ async function inspect(page: Page): Promise<ScanInspection> {
   });
 }
 
-export async function scanDevice(browser: Browser, inputUrl: string, device: Device, patch?: string): Promise<DeviceResult> {
-  const started = Date.now();
+/** Scan a family of viewports in one isolated browser context.
+ * Mobile and desktop pages are separate because Chromium's isMobile setting
+ * cannot be switched after context creation. Viewport dimensions are tested
+ * independently, but the document is loaded only once per family. */
+export async function scanDeviceGroup(
+  browser: Browser,
+  inputUrl: string,
+  devices: readonly Device[],
+  patch?: string,
+  emit?: (result: DeviceResult) => void,
+): Promise<DeviceResult[]> {
+  if (devices.length === 0) return [];
+  if (devices.some(d => (d.family === "mobile") !== (devices[0].family === "mobile"))) {
+    throw new Error("A viewport group cannot mix mobile and desktop emulation.");
+  }
+  const results: DeviceResult[] = [];
+  const groupStarted = Date.now();
   const context = await browser.newContext({
-    viewport: { width: device.width, height: device.height },
+    viewport: { width: devices[0].width, height: devices[0].height },
     deviceScaleFactor: 1,
-    isMobile: device.family === "mobile",
-    hasTouch: device.family === "mobile",
+    isMobile: devices[0].family === "mobile",
+    hasTouch: devices[0].family === "mobile",
     ignoreHTTPSErrors: false,
     serviceWorkers: "block",
     acceptDownloads: false,
@@ -118,76 +133,119 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     reducedMotion: "reduce",
     permissions: [],
   });
+
+  const push = (result: DeviceResult) => { results.push(result); emit?.(result); };
   let page: Page | undefined;
-  let capturedScreenshot: string | null = null;
+  let navigationError: string | undefined;
+  let statusCode = 200;
   try {
+    // Validate the origin of every browser request. Cache DNS checks by origin
+    // within the isolated session, but do not accept unchecked redirects.
     const verifiedHosts = new Map<string, Promise<string>>();
-    await context.route("**/*", async (route) => {
+    await context.route("**/*", async route => {
       try {
-        const reqUrl = route.request().url();
-        if (!/^https?:/i.test(reqUrl)) return await route.abort();
+        const target = route.request().url();
+        if (!/^https?:/i.test(target)) { await route.abort(); return; }
         const resourceType = route.request().resourceType();
-        if (resourceType === "media" || resourceType === "eventsource") return await route.abort();
-        const origin = new URL(reqUrl).origin;
-        let verified = verifiedHosts.get(origin);
-        if (!verified) {
-          verified = assertPublicTarget(reqUrl);
-          verifiedHosts.set(origin, verified);
-        }
-        await verified;
+        if (resourceType === "media" || resourceType === "eventsource") { await route.abort(); return; }
+        const origin = new URL(target).origin;
+        let check = verifiedHosts.get(origin);
+        if (!check) { check = assertPublicTarget(target); verifiedHosts.set(origin, check); }
+        await check;
         await route.continue();
-      } catch { try { await route.abort(); } catch {} }
+      } catch { await route.abort().catch(() => {}); }
     });
-    // Do not allow sites being scanned to create persistent socket connections.
     await context.routeWebSocket(/.*/, ws => ws.close());
     page = await context.newPage();
-    page.on("dialog", d => { void d.dismiss().catch(() => {}); });
+    page.on("dialog", dialog => { void dialog.dismiss().catch(() => {}); });
     page.on("popup", popup => { void popup.close().catch(() => {}); });
-    const navigationResponse = await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
-    await assertPublicTarget(page.url());
-    // Capture after core resources have a chance to paint. A strict cap prevents
-    // slow third-party scripts from delaying every viewport indefinitely.
-    await page.waitForLoadState("load", { timeout: 1350 }).catch(() => {});
-    await page.waitForTimeout(170);
-    if (patch) {
-      await page.addStyleTag({ content: patch });
-      await page.waitForTimeout(120);
+    try {
+      const response = await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
+      statusCode = response?.status() ?? 200;
+      await assertPublicTarget(page.url());
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // Some SPAs have loaded usable content before slow analytics prevent
+      // domcontentloaded. Do not discard their screenshot on a navigation timeout.
+      const usable = /timeout/i.test(msg) && await page.evaluate(() =>
+        Boolean(document.body && (document.body.children.length > 0 || document.body.innerText.length > 30))
+      ).catch(() => false);
+      if (!usable) navigationError = /timeout/i.test(msg)
+        ? "The website did not load in time. Try again or check site availability."
+        : "The browser could not open this public URL. It may block automated browsers.";
+      else await assertPublicTarget(page.url());
     }
-    // Capture real pixels before running DOM analysis so an inspection failure
-    // cannot make an otherwise valid website screenshot disappear.
-    const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 4000, fullPage: false });
-    capturedScreenshot = `data:image/jpeg;base64,${screenshotBuffer.toString("base64")}`;
-    const { findings: raw, diagnostics } = await inspect(page);
-    const issues: Issue[] = raw.map((finding, i) => {
-      const fix = issueFix(finding.type, finding.selector, device.width);
-      return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" || finding.type === "broken-image" ? "medium" : "high", ...fix };
-    });
-    const httpStatus = navigationResponse?.status() ?? 200;
-    if (httpStatus >= 400) return {
-      device, status: "error", issues: [], screenshot: capturedScreenshot, diagnostics,
-      error: `The website returned HTTP ${httpStatus}. This is the real response screenshot, but the layout is not marked as passing.`,
-      finalUrl: page.url(), loadMs: Date.now() - started,
-    };
-    return {
-      device,
-      status: issues.length ? "issues" : "pass",
-      issues,
-      diagnostics,
-      screenshot: capturedScreenshot,
-      finalUrl: page.url(),
-      loadMs: Date.now() - started,
-    };
+    if (!navigationError) {
+      await page.waitForLoadState("load", { timeout: 1300 }).catch(() => {});
+      if (patch) {
+        await page.addStyleTag({ content: patch });
+        await page.waitForTimeout(90);
+      }
+    }
+    for (const device of devices) {
+      const started = Date.now();
+      if (navigationError) {
+        push({ device, status: "error", issues: [], screenshot: null, error: navigationError, loadMs: Date.now() - groupStarted });
+        continue;
+      }
+      let screenshot: string | null = null;
+      try {
+        await page.setViewportSize({ width: device.width, height: device.height });
+        // A resize event is dispatched by Playwright; let responsive JavaScript
+        // and layout settle without re-navigating to the same website.
+        await page.waitForTimeout(190);
+        const image = await page.screenshot({
+          type: "jpeg", quality: 58, animations: "disabled",
+          timeout: 4500, fullPage: false,
+        });
+        screenshot = `data:image/jpeg;base64,${image.toString("base64")}`;
+        const { findings, diagnostics } = await inspect(page);
+        const issues: Issue[] = findings.map((finding, i) => ({
+          id: `${device.id}-${i}`, ...finding,
+          severity: finding.type === "overlap" || finding.type === "broken-image" ? "medium" : "high",
+          ...issueFix(finding.type, finding.selector, device.width),
+        }));
+        const httpError = statusCode >= 400;
+        push({
+          device,
+          status: httpError ? "error" : issues.length ? "issues" : "pass",
+          issues: httpError ? [] : issues,
+          screenshot,
+          diagnostics,
+          error: httpError ? `The scanned website returned HTTP ${statusCode}. This is a real screenshot of the error response, not a passing layout.` : undefined,
+          finalUrl: page.url(),
+          loadMs: Date.now() - groupStarted,
+        });
+      } catch (error) {
+        console.error("[Viewrift] Viewport failed:", device.id, error);
+        push({
+          device, status: "error", issues: [], screenshot,
+          error: screenshot
+            ? "Screenshot captured, but analysis failed. The viewport was not marked as passed."
+            : "The browser could not capture this viewport. It may have timed out or crashed.",
+          loadMs: Date.now() - started,
+        });
+      }
+    }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Unknown scan failure";
-    return {
-      device,
-      status: "error",
-      issues: [],
-      screenshot: capturedScreenshot,
-      error: capturedScreenshot ? "Screenshot captured, but automated analysis could not finish. This viewport has not passed validation." : /timeout/i.test(msg) ? "This page took too long to load." : /ERR_/i.test(msg) ? "The browser could not load this page. Check the URL or site restrictions." : "This viewport could not be tested. Check that it is public, then try again.",
-      loadMs: Date.now() - started,
-    };
+    console.error("[Viewrift] Browser group failed:", error);
+    for (const device of devices.filter(d => !results.some(r => r.device.id === d.id))) {
+      push({
+        device, status: "error", issues: [], screenshot: null,
+        error: "The browser failed while loading this group. Check scanner runtime and retry.",
+        loadMs: Date.now() - groupStarted,
+      });
+    }
   } finally {
     await context.close().catch(() => {});
   }
+  return results;
+}
+
+/** Single-device retest retains the same security, screenshot and analysis path. */
+export async function scanDevice(
+  browser: Browser, inputUrl: string, device: Device, patch?: string
+): Promise<DeviceResult> {
+  const result = await scanDeviceGroup(browser, inputUrl, [device], patch);
+  return result[0];
 }
