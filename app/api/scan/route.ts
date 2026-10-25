@@ -1,7 +1,6 @@
 import { assertPublicTarget, validateTemporaryCSS } from "@/lib/safety";
 import { improveFixWithGroq } from "@/lib/ai";
 import { DEVICES, type StreamEvent } from "@/lib/types";
-import { mapWithConcurrency } from "@/lib/scan-queue";
 import type { Browser } from "playwright-core";
 
 export const runtime = "nodejs";
@@ -49,37 +48,40 @@ export async function POST(request: Request): Promise<Response> {
         send({ type: "start", url });
         // Load the heavy browser engine only after URL validation. A missing
         // Chromium package must not crash module initialization of this route.
-        const { launchScanner, scanDevice } = await import("@/lib/scanner");
+        const { launchScanner, scanDeviceGroup } = await import("@/lib/scanner");
         browser = await launchScanner();
         // Two isolated contexts run concurrently inside one Chromium process.
         // Keep the cap conservative for serverless memory; deliver each result immediately.
         let aiBudget = 2;
         const aiTasks: Promise<void>[] = [];
-        await mapWithConcurrency(selected, 2, async device => {
-          if (request.signal.aborted) return;
-          send({ type: "device_start", deviceId: device.id });
-          let result;
-          try {
-            result = await scanDevice(browser!, url, device, patch);
-          } catch (error) {
-            console.error("[Viewrift] Unhandled viewport error:", error);
-            result = { device, status: "error" as const, issues: [], screenshot: null, error: "This viewport could not be tested." };
-          }
-          // Browser analysis is complete; do NOT wait for Groq before delivering a result.
-          send({ type: "device_result", result });
-          if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
-            aiBudget--;
-            const original = result.issues[0];
-            aiTasks.push(improveFixWithGroq(original, device.width).then(improved => {
-              if (improved.ai && !request.signal.aborted) {
-                send({ type: "issue_enriched", deviceId: device.id, issue: improved });
-              }
-            }).catch(() => {}));
-          }
-        });
-        // Optional model calls start during scanning and are globally bounded
-        // by lib/ai.ts. Browser results stay available even if AI is slow.
+        let completed = 0;
+        const groups = [
+          selected.filter(device => device.family === "mobile"),
+          selected.filter(device => device.family !== "mobile"),
+        ].filter(group => group.length);
+        for (const group of groups) {
+          if (request.signal.aborted) break;
+          for (const device of group) send({ type: "device_start", deviceId: device.id });
+          await scanDeviceGroup(browser, url, group, patch, result => {
+            completed++;
+            send({ type: "device_result", result });
+            // Never delay screenshots to wait for AI suggestion generation.
+            if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
+              aiBudget--;
+              const first = result.issues[0];
+              aiTasks.push(improveFixWithGroq(first, result.device.width).then(improved => {
+                if (improved.ai && !request.signal.aborted) {
+                  send({ type: "issue_enriched", deviceId: result.device.id, issue: improved });
+                }
+              }).catch(() => {}));
+            }
+          });
+        }
+        // Keep AI bounded; the guaranteed result is always the measured browser result.
         if (aiTasks.length) await Promise.allSettled(aiTasks);
+        if (!request.signal.aborted && completed !== selected.length) {
+          send({ type: "error", message: `Only ${completed} of ${selected.length} viewports finished. Please retry.` });
+        }
         if (!request.signal.aborted) send({ type: "done" });
       } catch (error) {
         // Keep internal stack traces server-side, return a user-actionable
