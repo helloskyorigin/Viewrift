@@ -48,8 +48,11 @@ export async function POST(request: Request): Promise<Response> {
         send({ type: "start", url });
         // Load the heavy browser engine only after URL validation. A missing
         // Chromium package must not crash module initialization of this route.
+        send({ type: "engine_status", state: "starting" });
+        const bootStarted = Date.now();
         const { launchScanner, scanDeviceGroup } = await import("@/lib/scanner");
         browser = await launchScanner();
+        send({ type: "engine_status", state: "ready", loadMs: Date.now() - bootStarted });
         // Two isolated contexts run concurrently inside one Chromium process.
         // Keep the cap conservative for serverless memory; deliver each result immediately.
         let aiBudget = 2;
