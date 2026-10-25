@@ -1,7 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright-core";
 import { assertPublicTarget } from "./safety";
 import { issueFix } from "./fixes";
-import type { Device, DeviceResult, Issue } from "./types";
+import type { Device, DeviceResult, DeviceDiagnostics, Issue } from "./types";
 
 const SCAN_TIMEOUT = 8500; // Per-navigation upper bound; never wait for networkidle on third-party sites.
 
@@ -26,10 +26,11 @@ export async function launchScanner(): Promise<Browser> {
 }
 
 type RawFinding = { type: Issue["type"]; selector: string; title: string; description: string; rect: Issue["rect"] };
+type ScanInspection = { findings: RawFinding[]; diagnostics: DeviceDiagnostics };
 
-async function inspect(page: Page): Promise<RawFinding[]> {
+async function inspect(page: Page): Promise<ScanInspection> {
   return page.evaluate(() => {
-    type Finding = { type: "horizontal-overflow" | "element-overflow" | "overlap"; selector: string; title: string; description: string; rect: { x: number; y: number; width: number; height: number } | null };
+    type Finding = { type: "horizontal-overflow" | "element-overflow" | "overlap" | "broken-image"; selector: string; title: string; description: string; rect: { x: number; y: number; width: number; height: number } | null };
     const W = window.innerWidth;
     const findings: Finding[] = [];
     const selectorFor = (el: Element): string => {
@@ -78,7 +79,28 @@ async function inspect(page: Page): Promise<RawFinding[]> {
         }
       }
     }
-    return findings.sort((a, b) => Number(b.type === "horizontal-overflow") - Number(a.type === "horizontal-overflow")).slice(0, 8);
+    const brokenImages = Array.from(document.images).filter(image => image.complete && image.naturalWidth === 0 && (image.currentSrc || image.src));
+    for (const image of brokenImages.slice(0, 2)) {
+      const r = image.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
+      findings.push({
+        type: "broken-image", selector: selectorFor(image), title: "Image failed to load",
+        description: "A page image finished loading but has no image data. Verify its source URL, access permissions, and network response.",
+        rect: rectOf(r),
+      });
+    }
+    return {
+      findings: findings.sort((a, b) => Number(b.type === "horizontal-overflow") - Number(a.type === "horizontal-overflow")).slice(0, 10),
+      diagnostics: {
+        title: document.title.slice(0, 160),
+        documentWidth: pageWidth,
+        overflowPixels: Math.max(0, pageWidth - W),
+        elementsInspected: elements.length,
+        interactiveElements: document.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea').length,
+        imagesFound: document.images.length,
+        imagesBroken: brokenImages.length,
+      },
+    };
   });
 }
 
@@ -122,21 +144,25 @@ export async function scanDevice(browser: Browser, inputUrl: string, device: Dev
     page.on("popup", popup => { void popup.close().catch(() => {}); });
     await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT });
     await assertPublicTarget(page.url());
-    await page.waitForTimeout(180);
+    // Capture after core resources have a chance to paint. A strict cap prevents
+    // slow third-party scripts from delaying every viewport indefinitely.
+    await page.waitForLoadState("load", { timeout: 1350 }).catch(() => {});
+    await page.waitForTimeout(170);
     if (patch) {
       await page.addStyleTag({ content: patch });
       await page.waitForTimeout(120);
     }
-    const raw = await inspect(page);
+    const { findings: raw, diagnostics } = await inspect(page);
     const issues: Issue[] = raw.map((finding, i) => {
       const fix = issueFix(finding.type, finding.selector, device.width);
-      return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" ? "medium" : "high", ...fix };
+      return { id: `${device.id}-${i}`, ...finding, severity: finding.type === "overlap" || finding.type === "broken-image" ? "medium" : "high", ...fix };
     });
     const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 4000, fullPage: false });
     return {
       device,
       status: issues.length ? "issues" : "pass",
       issues,
+      diagnostics,
       screenshot: `data:image/jpeg;base64,${screenshotBuffer.toString("base64")}`,
       finalUrl: page.url(),
       loadMs: Date.now() - started,
