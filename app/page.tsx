@@ -60,7 +60,7 @@ export default function Home() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  async function readStream(response: Response, onResult: (r: DeviceResult) => void, onStart?: (id: string) => void) {
+  async function readStream(response: Response, onResult: (r: DeviceResult) => void, onStart?: (id: string) => void, onEnriched?: (id: Device["id"], issue: Issue) => void) {
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       throw new Error(typeof payload.error === "string" ? payload.error : response.status === 500 ? "The scanner backend failed (HTTP 500). Check Vercel Runtime Logs for /api/scan and confirm the Chromium binary is packaged." : `Scan failed (${response.status}).`);
@@ -80,6 +80,7 @@ export default function Home() {
         const item = JSON.parse(line) as StreamEvent;
         if (item.type === "device_start") onStart?.(item.deviceId);
         if (item.type === "device_result") onResult(item.result);
+        if (item.type === "issue_enriched") onEnriched?.(item.deviceId, item.issue);
         if (item.type === "error") throw new Error(item.message);
         if (item.type === "done") ended = true;
       }
@@ -101,6 +102,9 @@ export default function Home() {
         await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({url: raw}), signal: controller.signal }),
         result => { received.push(result); setResults(prev => [...prev.filter(r => r.device.id !== result.device.id), result]); setDeviceStates(prev => ({...prev,[result.device.id]:"complete"})); },
         id => setDeviceStates(prev => ({...prev,[id]:"scanning"})),
+        (id, improved) => setResults(prev => prev.map(r => r.device.id === id
+          ? { ...r, issues: r.issues.map(i => i.id === improved.id ? improved : i) }
+          : r)),
       );
       setPhase("results");
     } catch (err) {
