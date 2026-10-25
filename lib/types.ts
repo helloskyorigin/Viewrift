@@ -37,5 +37,6 @@ export type StreamEvent =
   | { type: "start"; url: string }
   | { type: "device_start"; deviceId: Device["id"] }
   | { type: "device_result"; result: DeviceResult }
+  | { type: "issue_enriched"; deviceId: Device["id"]; issue: Issue }
   | { type: "error"; message: string }
   | { type: "done" };
