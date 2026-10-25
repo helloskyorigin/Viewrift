@@ -53,13 +53,19 @@ try{
  }finally{await browser.close();}
  let r=await fetch(base+"/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:"http://127.0.0.1"})});
  assert.equal(r.status,400,"Local IP must be blocked");
- r=await fetch(base+"/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:"https://example.com",deviceIds:["android"]}),signal:AbortSignal.timeout(100000)});
+ r=await fetch(base+"/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:"https://example.com"}),signal:AbortSignal.timeout(100000)});
  assert.equal(r.status,200,"Scanner did not stream");
  const lines=(await r.text()).trim().split("\n").map(line=>JSON.parse(line));
- const result=lines.find(x=>x.type==="device_result");
- assert.ok(lines.some(x=>x.type==="device_start"),"Missing streamed progress");
- assert.ok(result,"Missing browser scan result");
- assert.notEqual(result.result.status,"error",result.result.error);
- assert.ok(result.result.screenshot?.startsWith("data:image/jpeg;base64,"),"Missing Chromium screenshot");
- console.log("Production smoke succeeded.");
+ const actual=lines.filter(x=>x.type==="device_result");
+ assert.equal(lines.filter(x=>x.type==="device_start").length,5,"Expected progress events for all five viewports");
+ assert.equal(actual.length,5,"Expected five real browser scan results");
+ assert.deepEqual(new Set(actual.map(x=>x.result.device.id)),new Set(["android","iphone","tablet","laptop","desktop"]),"Viewport list mismatch");
+ for(const event of actual){
+   assert.notEqual(event.result.status,"error",`${event.result.device.id}: ${event.result.error || "scan failed"}`);
+   assert.ok(event.result.screenshot?.startsWith("data:image/jpeg;base64,"),`${event.result.device.id}: missing real JPEG capture`);
+   assert.ok(event.result.diagnostics?.documentWidth>0,`${event.result.device.id}: missing real DOM diagnostics`);
+   assert.ok(event.result.loadMs>=0,`${event.result.device.id}: missing timing`);
+ }
+ assert.ok(lines.some(x=>x.type==="done"),"Missing completed scan event");
+ console.log("Live five-viewport browser scan succeeded.");
 }finally{server.kill("SIGTERM");}
