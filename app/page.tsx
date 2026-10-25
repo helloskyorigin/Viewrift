@@ -117,7 +117,7 @@ export default function Home() {
 
   function reset() { abortRef.current?.abort(); setScanActive(false); setPhase("landing"); setError(""); setScanWarning(""); setRetestMessage(""); window.scrollTo({top:0,behavior:"smooth"}); }
   async function retest() {
-    if (!selectedResult || !issue || sample || retesting) return;
+    if (!selectedResult || !issue || retesting) return;
     setRetesting(true); setRetestMessage("");
     try {
       let after: DeviceResult | undefined;
