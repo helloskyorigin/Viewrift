@@ -18,7 +18,7 @@ export async function improveFixWithGroq(issue: Issue, viewport: number): Promis
         ],
         response_format: { type: "json_object" },
       }),
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(1900),
     });
     if (!response.ok) return issue;
     const data = await response.json();
