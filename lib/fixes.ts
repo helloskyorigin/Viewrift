@@ -14,6 +14,10 @@ export function issueFix(type: Issue["type"], selector: string, viewport: number
     suggestion: "Constrain the element width and allow long content to wrap. Check fixed widths and min-width rules.",
     css: `@media (max-width: ${breakpoint}px) {\n  ${safe} {\n    max-width: 100%;\n    min-width: 0;\n    overflow-wrap: anywhere;\n  }\n}`,
   };
+  if (type === "broken-image") return {
+    suggestion: "The image could not be loaded. Verify its URL, CDN rules, deployment path and permissions. CSS cannot repair an invalid image resource.",
+    css: `/* Inspect the image source and network request for ${safe}. Fix the asset URL or response first. */`,
+  };
   return {
     suggestion: "Inspect overlapping fixed/sticky elements and reserve space or reduce sizing at this breakpoint.",
     css: `/* Review layout for overlapping elements */\n@media (max-width: ${breakpoint}px) {\n  ${safe} { max-width: 100%; }\n}`,
