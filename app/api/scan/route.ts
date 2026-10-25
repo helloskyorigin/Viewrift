@@ -1,6 +1,7 @@
 import { assertPublicTarget, validateTemporaryCSS } from "@/lib/safety";
 import { improveFixWithGroq } from "@/lib/ai";
 import { DEVICES, type StreamEvent } from "@/lib/types";
+import { mapWithConcurrency } from "@/lib/scan-queue";
 import type { Browser } from "playwright-core";
 
 export const runtime = "nodejs";
@@ -50,17 +51,36 @@ export async function POST(request: Request): Promise<Response> {
         // Chromium package must not crash module initialization of this route.
         const { launchScanner, scanDevice } = await import("@/lib/scanner");
         browser = await launchScanner();
+        // Two isolated contexts run concurrently inside one Chromium process.
+        // Keep the cap conservative for serverless memory; deliver each result immediately.
         let aiBudget = 2;
-        for (const device of selected) {
+        const aiTasks: Promise<void>[] = [];
+        await mapWithConcurrency(selected, 2, async device => {
+          if (request.signal.aborted) return;
           send({ type: "device_start", deviceId: device.id });
-          const result = await scanDevice(browser, url, device, patch);
-          if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
-            result.issues[0] = await improveFixWithGroq(result.issues[0], device.width);
-            aiBudget--;
+          let result;
+          try {
+            result = await scanDevice(browser!, url, device, patch);
+          } catch (error) {
+            console.error("[Viewrift] Unhandled viewport error:", error);
+            result = { device, status: "error" as const, issues: [], screenshot: null, error: "This viewport could not be tested." };
           }
+          // Browser analysis is complete; do NOT wait for Groq before delivering a result.
           send({ type: "device_result", result });
-        }
-        send({ type: "done" });
+          if (!patch && result.status === "issues" && aiBudget > 0 && process.env.GROQ_API_KEY) {
+            aiBudget--;
+            const original = result.issues[0];
+            aiTasks.push(improveFixWithGroq(original, device.width).then(improved => {
+              if (improved.ai && !request.signal.aborted) {
+                send({ type: "issue_enriched", deviceId: device.id, issue: improved });
+              }
+            }).catch(() => {}));
+          }
+        });
+        // Optional model calls start during scanning and are globally bounded
+        // by lib/ai.ts. Browser results stay available even if AI is slow.
+        if (aiTasks.length) await Promise.allSettled(aiTasks);
+        if (!request.signal.aborted) send({ type: "done" });
       } catch (error) {
         // Keep internal stack traces server-side, return a user-actionable
         // message instead of a vague 500 error.
