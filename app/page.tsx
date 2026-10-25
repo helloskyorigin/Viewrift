@@ -46,6 +46,7 @@ export default function Home() {
   const [selectedIssue, setSelectedIssue] = useState(0);
   const [sample, setSample] = useState(false);
   const [retesting, setRetesting] = useState(false);
+  const [scanActive, setScanActive] = useState(false);
   const [retestMessage, setRetestMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -95,7 +96,7 @@ export default function Home() {
     setScannedUrl(raw.trim()); setInput(raw.trim()); setError(""); setScanWarning(""); setSample(false); setResults([]);
     setDeviceStates(Object.fromEntries(DEVICES.map(d => [d.id, "pending"])));
     setSelectedId("android"); setSelectedIssue(0); setRetestMessage("");
-    setPhase("scanning"); window.scrollTo({top:0,behavior:"smooth"});
+    setScanActive(true); setPhase("scanning"); window.scrollTo({top:0,behavior:"smooth"});
     const received: DeviceResult[] = [];
     try {
       await readStream(
@@ -112,16 +113,19 @@ export default function Home() {
       const message = err instanceof Error ? err.message : "Could not complete this scan.";
       if (received.length) { setScanWarning(`${message} Showing ${received.length} completed viewport${received.length===1 ? "" : "s"}.`); setPhase("results"); }
       else { setError(message); setPhase("landing"); }
+    } finally {
+      if (abortRef.current === controller) setScanActive(false);
     }
   }
 
   function loadSample() {
+    abortRef.current?.abort(); setScanActive(false);
     setScannedUrl("https://sample.viewrift.dev"); setSample(true); setError(""); setScanWarning(""); setResults(sampleResults);
     setDeviceStates(Object.fromEntries(DEVICES.map(d => [d.id, "complete"])));
     setSelectedId("android"); setSelectedIssue(0); setRetestMessage(""); setPhase("results");
     window.scrollTo({top:0,behavior:"smooth"});
   }
-  function reset() { abortRef.current?.abort(); setPhase("landing"); setError(""); setScanWarning(""); setRetestMessage(""); window.scrollTo({top:0,behavior:"smooth"}); }
+  function reset() { abortRef.current?.abort(); setScanActive(false); setPhase("landing"); setError(""); setScanWarning(""); setRetestMessage(""); window.scrollTo({top:0,behavior:"smooth"}); }
   async function retest() {
     if (!selectedResult || !issue || sample || retesting) return;
     setRetesting(true); setRetestMessage("");
@@ -139,7 +143,7 @@ export default function Home() {
     finally { setRetesting(false); }
   }
   function downloadReport() {
-    const report = { product: "Viewrift", status: sample ? "sample" : scanWarning ? "partial" : "completed", website: scannedUrl, scannedAt: new Date().toISOString(), note: "Automated checks do not guarantee a bug-free website.", devices: results.map(({device,status,issues,finalUrl,loadMs,error}) => ({device,status,issues,finalUrl,loadMs,error})) };
+    const report = { product: "Viewrift", status: sample ? "sample" : scanActive || scanWarning ? "partial" : "completed", website: scannedUrl, scannedAt: new Date().toISOString(), note: "Automated checks do not guarantee a bug-free website.", devices: results.map(({device,status,issues,finalUrl,loadMs,error}) => ({device,status,issues,finalUrl,loadMs,error})) };
     const blob = new Blob([JSON.stringify(report,null,2)],{type:"application/json"});
     const href = URL.createObjectURL(blob); const link = document.createElement("a"); link.href=href; link.download=`viewrift-report-${Date.now()}.json`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(href),1000);
   }
@@ -162,8 +166,9 @@ export default function Home() {
       <footer className="site-footer"><div className="wrap footer-content"><Logo/><span>Built to help good websites feel great on every screen.</span><nav className="footer-links" aria-label="Legal and support"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/helloskyorigin/Viewrift" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav><span>© 2026 Viewrift</span></div></footer>
     </> : <>
       <header className="app-header"><div className="wrap app-header-inner"><button className="app-home" onClick={reset} aria-label="Return home"><Logo/></button><div className="app-header-right"><span className="app-mode">{phase === "scanning" ? "Live scan" : "Scan report"}</span><button className="text-btn" onClick={reset}><ArrowLeft size={16}/> New test</button></div></div></header>
-      {phase === "scanning" ? <section className="scan-page wrap"><div className="scan-header"><span className="scan-large-icon"><ScanLine size={34}/></span><div className="kicker">LIVE BROWSER SCAN</div><h1>Checking every screen<span className="moving-dots">...</span></h1><p>Real Chromium sessions are loading <b>{hostname}</b> across five viewport sizes. Screenshots and results will appear as each test completes.</p></div><div className="scan-panel"><div className="scan-panel-head"><div><span className="scan-caption">SCAN PROGRESS</span><h2>{completedCount} of 5 screens completed</h2></div><span className="scan-percent">{Math.round(completedCount / 5 * 100)}%</span></div><div className="progress-track"><div style={{width:`${completedCount / 5 * 100}%`}}/></div><div className="scan-rows">{DEVICES.map(d => <div className="scan-row" key={d.id}><span className="scan-device-ico"><DeviceIcon device={d}/></span><span className="scan-name"><b>{d.label}</b><small>{d.width} × {d.height}</small></span><span className={`scan-state scan-${deviceStates[d.id] || "pending"}`}>{deviceStates[d.id] === "complete" ? <><CheckCircle2 size={17}/> Complete</> : deviceStates[d.id] === "scanning" ? <><LoaderCircle size={17} className="spin"/> Scanning</> : "Waiting"}</span></div>)}</div></div><p className="scan-note"><ShieldCheck size={17}/> The scan only reads your website. It doesn't modify your production code.</p></section> :
+      {phase === "scanning" ? <section className="scan-page wrap"><div className="scan-header"><span className="scan-large-icon"><ScanLine size={34}/></span><div className="kicker">LIVE BROWSER SCAN</div><h1>Checking every screen<span className="moving-dots">...</span></h1><p>Real Chromium sessions are loading <b>{hostname}</b> across five viewport sizes. Screenshots and results will appear as each test completes.</p></div><div className="scan-panel"><div className="scan-panel-head"><div><span className="scan-caption">SCAN PROGRESS</span><h2>{completedCount} of 5 screens completed</h2></div><span className="scan-percent">{Math.round(completedCount / 5 * 100)}%</span></div><div className="progress-track"><div style={{width:`${completedCount / 5 * 100}%`}}/></div><div className="scan-rows">{DEVICES.map(d => <div className="scan-row" key={d.id}><span className="scan-device-ico"><DeviceIcon device={d}/></span><span className="scan-name"><b>{d.label}</b><small>{d.width} × {d.height}</small></span><span className={`scan-state scan-${deviceStates[d.id] || "pending"}`}>{deviceStates[d.id] === "complete" ? <><CheckCircle2 size={17}/> Complete</> : deviceStates[d.id] === "scanning" ? <><LoaderCircle size={17} className="spin"/> Scanning</> : "Waiting"}</span></div>)}</div></div>{completedCount > 0 && <div className="scan-preview-action"><button className="secondary-btn" onClick={() => setPhase("results")}>View {completedCount} ready result{completedCount === 1 ? "" : "s"} <ArrowRight size={16}/></button></div>}<p className="scan-note"><ShieldCheck size={17}/> The scan only reads your website. It doesn't modify your production code.</p></section> :
       <section className="report-page wrap"><div className="report-title-row"><div><span className="report-eyebrow">RESPONSIVE TEST REPORT {sample && <span className="sample-tag">SAMPLE DATA</span>}</span><h1>Here's how your site holds up.</h1><p><Globe2 size={16}/> {hostname} <span>·</span> {results.length} screen sizes tested</p></div><div className="report-actions"><button className="download-link" onClick={downloadReport}><FileSearch size={16}/> Export report</button><button className="secondary-btn" onClick={() => sample ? loadSample() : void runScan(scannedUrl)}><RefreshCw size={16}/> Run again</button></div></div>
+        {scanActive && <div className="report-live-note" role="status"><LoaderCircle size={17} className="spin"/> Live scan in progress · {completedCount} of 5 screens ready. More results will appear automatically.</div>}
         {scanWarning && <div className="scan-recover-note" role="status"><TriangleAlert size={16}/> {scanWarning}</div>}
         {sample && <div className="sample-note"><Eye size={17}/> You're viewing an illustrative report. Screenshots and issues here are examples, not results from a real scan. <button onClick={reset}>Run a live scan <ArrowRight size={14}/></button></div>}
         <div className="metrics"><div className="metric"><span>SCREEN SIZES</span><strong>{results.length}<small> / 5</small></strong><p>{failedCount ? `${failedCount} could not be tested` : "viewports checked"}</p></div><div className="metric"><span>PASSED</span><strong className="metric-pass">{passedCount}</strong><p>no measured issues</p></div><div className="metric"><span>ISSUES FOUND</span><strong className="metric-alert">{issuesCount}</strong><p>automated findings</p></div></div>
